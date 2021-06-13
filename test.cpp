@@ -38,19 +38,18 @@ class serializer {
 	using serialized_members = std::vector<member_serial>;
 	
 	/*
-	template<typename T, typename I, typename F>
+	template<typename T>
 	constexpr bool is_container(){
-		return std::is_same<T, std::array<I, F>>::value || std::is_same<T, std::vector<I>>::value || std::is_same<T, std::list<I>>::value;
+		return is_specialization<T, std::array>{} || is_specialization<T, std::vector>{} || is_specialization<T, std::list>{};
 	}
 	*/
 	
 	template<typename Tnew>
-	void stringify(serialized_members& all_membs, std::size_t& ser_len, std::string_view name, const Tnew& value) {
+	void stringify(serialized_members& all_membs, std::size_t& ser_len, std::string_view name, Tnew& value) {
 		if constexpr (std::is_arithmetic_v<Tnew>) {
 			std::string stringified = std::to_string(value);
 			
 			ser_len += name.size() + stringified.size();
-			ser_len += 2; // TODO make this serialization target dependent
 			all_membs.emplace_back(name, stringified, obj_type::SIMPLE);
 		} else if constexpr (std::is_same<Tnew, std::string>::value || std::is_same<Tnew, const char *>::value) {
 			using namespace std::string_literals;
@@ -61,7 +60,7 @@ class serializer {
 			ser_len += name.size() + stringified.size();
 			ser_len += 2; // TODO make this serialization target dependent
 			all_membs.emplace_back(name, stringified, obj_type::SIMPLE);
-		} else if constexpr (is_specialization<Tnew, std::vector>{}) {
+		} else if constexpr (is_specialization<Tnew, std::vector>{}) { // TODO add array and list
 			member_serial ms {name, "", obj_type::CONTAINER};
 			ms.sub_members.reserve(value.size());
 			
@@ -71,10 +70,13 @@ class serializer {
 				++i;
 			}
 			all_membs.push_back(ms); // std::move???
-			ser_len += 2 + (value.size() * 1); // TODO make this serialization target dependent
-		} else if constexpr (std::is_base_of_v<serializer, Tnew>) {
+			ser_len += name.size() + 2 + value.size(); // TODO make this serialization target dependent
+		} else if constexpr (std::is_base_of_v<serializer<Tnew>, Tnew>) {
+			// TODO make serializer public?
+			std::string stringified = value.serialize(); // Maybe create new method to get raw members
 			
-			std::string stringified = "TODO";
+			ser_len += name.size() + stringified.size();
+			all_membs.emplace_back(name, stringified, obj_type::RECURSIVE);
 		} else {
 			std::string stringified = "???";
 		}
@@ -94,6 +96,46 @@ class serializer {
 		unroll_Args(all_membs, ser_len, args...);
 	}
 	
+	void container_to_json(std::string& result, const serialized_members& all_membs){
+		result += "[";
+		
+		for (const auto& sub_m : all_membs) {
+			if(sub_m.type == SIMPLE){
+				result += sub_m.value;
+			} else if (sub_m.type == CONTAINER) {
+				container_to_json(result, sub_m.sub_members);
+			} else {
+				// recursive
+				object_to_json(result, sub_m.sub_members);
+			}
+			result += ",";
+		}
+		result = result.substr(0, result.size() - 1);
+		
+		result += "]";
+	}
+	
+	void object_to_json(std::string& result, const serialized_members& all_membs) {
+		result += "{";
+		for (const auto& m : all_membs) {
+			result += "\"";
+			result.append(m.name);
+			result += "\":";
+			if(m.type == SIMPLE){
+				result += m.value;
+			} else if (m.type == CONTAINER) {
+				container_to_json(result, m.sub_members);
+			} else {
+				// recursive
+				result += m.value;
+			}
+			result += ",";
+		}
+		// remove last comma
+		result = result.substr(0, result.size() - 1);
+		result += "}";
+	}
+	
 protected:
 
 	template<typename... sub_Args>
@@ -110,39 +152,27 @@ protected:
 		acc_len += 2 /*begin&end closing bracket*/ + (all_membs.size() * (2 /*QuotMark of name*/ + 1 /*colon*/ + 1 /*comma*/));
 		std::string result;
 		result.reserve(acc_len);
-		result += "{";
-		for (const auto& m : all_membs) {
-			result += "\""s;
-			result.append(m.name);
-			result += "\":"s;
-			if(m.type == SIMPLE){
-				result += m.value;
-			} else if (m.type == CONTAINER) {
-				
-				result += "["s;
-				
-				for (const auto& sub_m : m.sub_members) {
-					// TODO recursive
-					result += sub_m.value + ","s;
-				}
-				result = result.substr(0, result.size() - 1);
-				
-				result += "]"s;
-			}
-			result += ","s;
-		}
-		// remove last comma
-		result = result.substr(0, result.size() - 1);
-		result += "}";
+		object_to_json(result, all_membs);
 		
 		return result;
 	}
-	
+
+public:
+
 	virtual std::string serialize() = 0;
+};
+
+class B : public serializer<B> {
+
+	int d = 5;
+	int e = 3;
 	
 public:
-	std::string to_string() {
-		return serialize();
+	virtual std::string serialize() override {
+		return impl_serialize(
+			member{"d", &B::d}, 
+			member{"e", &B::e}
+		);
 	}
 };
 
@@ -152,24 +182,24 @@ class A : public serializer<A> {
 	int g = 3;
 	std::string bla = "ggggggg";
 	std::vector<int> list{1,2,3,4,5};
+	B b;
 	
-protected:
+public:
 	virtual std::string serialize() override {
 		return impl_serialize(
 			member{"i", &A::i}, 
 			member{"g", &A::g},
 			member{"bla", &A::bla},
-			member{"list", &A::list}
+			member{"list", &A::list},
+			member{"b", &A::b}
 		);
 	}
-public:
-
 };
 
 int main () {
 	A a;
 	
-	std::cout << a.to_string() << std::endl;
+	std::cout << a.serialize() << std::endl;
 
 	return 0;
 }
