@@ -1,30 +1,5 @@
-#include <iostream>
-#include <string>
-#include <string_view>
-#include <vector>
-#include <array>
-#include <list>
-#include <type_traits>
-
-enum obj_type {
-	SIMPLE,
-	CONTAINER,
-	RECURSIVE
-};
-
-template<typename T>
-struct member {
-	std::string_view name;
-	T value;
-};
-
-struct member_serial {
-	std::string_view name;
-	std::string value;
-	obj_type type;
-	std::vector<member_serial> sub_members;
-};
-
+#include "member.h"
+#include "member_serial.h"
 
 // https://stackoverflow.com/questions/31762958/check-if-class-is-a-template-specialization
 template <class T, template <class...> class Template>
@@ -161,45 +136,3 @@ public:
 
 	virtual std::string serialize() = 0;
 };
-
-class B : public serializer<B> {
-
-	int d = 5;
-	int e = 3;
-	
-public:
-	virtual std::string serialize() override {
-		return impl_serialize(
-			member{"d", &B::d}, 
-			member{"e", &B::e}
-		);
-	}
-};
-
-class A : public serializer<A> {
-
-	int i = 5;
-	int g = 3;
-	std::string bla = "ggggggg";
-	std::vector<int> list{1,2,3,4,5};
-	B b;
-	
-public:
-	virtual std::string serialize() override {
-		return impl_serialize(
-			member{"i", &A::i}, 
-			member{"g", &A::g},
-			member{"bla", &A::bla},
-			member{"list", &A::list},
-			member{"b", &A::b}
-		);
-	}
-};
-
-int main () {
-	A a;
-	
-	std::cout << a.serialize() << std::endl;
-
-	return 0;
-}
